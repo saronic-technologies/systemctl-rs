@@ -140,6 +140,18 @@ pub fn get_active_state(unit: &str) -> std::io::Result<ActiveState> {
     )
 }
 
+/// Returns a list of services that are dependencies of the given unit
+pub fn list_dependencies(unit: &str) -> std::io::Result<Vec<String>> {
+    let output = systemctl_capture(vec!["list-dependencies", unit])?;
+    let mut dependencies = Vec::<String>::new();
+    for line in output.lines().skip(1) {
+        dependencies.push(String::from(
+            line.replace(|c: char| !c.is_ascii(), "").trim(),
+        ));
+    }
+    Ok(dependencies)
+}
+
 /// Isolates given unit, only self and its dependencies are
 /// now actively running
 pub fn isolate(unit: &str) -> std::io::Result<ExitStatus> {
@@ -788,15 +800,24 @@ mod test {
             }
         }
     }
+
     #[test]
     fn test_list_units_full() {
         let units = list_units_full(None, None, None).unwrap(); // all units
         for unit in units {
             println!("####################################");
             println!("Unit: {}", unit.unit_file);
-            println!("State: {}", unit.loaded_state);
+            println!("State: {}", unit.state);
             println!("Vendor Preset: {:?}", unit.vendor_preset);
             println!("####################################");
+        }
+    }
+
+    #[test]
+    fn test_list_dependencies() {
+        let units = list_dependencies("sound.target").unwrap();
+        for unit in units {
+            println!("{unit}");
         }
     }
 

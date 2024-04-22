@@ -1,4 +1,4 @@
-//! Crate to manage and monitor services through `systemctl`   
+//! Crate to manage and monitor services through `systemctl`
 //! Homepage: <https://github.com/gwbres/systemctl>
 use std::io::{Error, ErrorKind, Read};
 use std::process::{Child, ExitStatus};
@@ -8,15 +8,18 @@ use strum_macros::EnumString;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-const SYSTEMCTL_PATH: &str = "/usr/bin/systemctl";
+const SYSTEMCTL_PATH: Option<&str> = std::option_env!("SYSTEMCTL_PATH");
 
 /// Invokes `systemctl $args`
 fn spawn_child(args: Vec<&str>) -> std::io::Result<Child> {
-    std::process::Command::new(std::env::var("SYSTEMCTL_PATH").unwrap_or(SYSTEMCTL_PATH.into()))
-        .args(args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
+    std::process::Command::new(
+        std::env::var("SYSTEMCTL_PATH")
+            .unwrap_or(SYSTEMCTL_PATH.unwrap_or("/usr/bin/systemctl").into()),
+    )
+    .args(args)
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::null())
+    .spawn()
 }
 
 /// Invokes `systemctl $args` silently

@@ -143,8 +143,13 @@ pub fn get_active_state(unit: &str) -> std::io::Result<ActiveState> {
 /// Returns a list of services that are dependencies of the given unit
 pub fn list_dependencies(unit: &str) -> std::io::Result<Vec<String>> {
     let output = systemctl_capture(vec!["list-dependencies", unit])?;
+
+    list_dependencies_from_raw(output)
+}
+
+pub fn list_dependencies_from_raw(raw: String) -> std::io::Result<Vec<String>> {
     let mut dependencies = Vec::<String>::new();
-    for line in output.lines().skip(1) {
+    for line in raw.lines().skip(1) {
         dependencies.push(String::from(
             line.replace(|c: char| !c.is_ascii(), "").trim(),
         ));
@@ -195,9 +200,15 @@ pub fn list_units_full(
     if let Some(glob) = glob {
         args.push(glob)
     }
-    let mut result: Vec<UnitList> = Vec::new();
     let content = systemctl_capture(args)?;
-    let lines: Vec<&str> = content.lines().collect();
+
+    list_units_full_from_raw(content)
+}
+
+pub fn list_units_full_from_raw(raw: String) -> std::io::Result<Vec<UnitList>> {
+    let lines: Vec<&str> = raw.lines().collect();
+
+    let mut result: Vec<UnitList> = Vec::new();
 
     for l in &lines[1..lines.len() - 6] {
         let _ = l.replace(|c: char| !c.is_ascii(), "").trim();

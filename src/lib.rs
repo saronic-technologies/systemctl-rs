@@ -174,20 +174,16 @@ pub fn unfreeze(unit: &str) -> std::io::Result<ExitStatus> {
 /// ie., service could be or is actively deployed
 /// and manageable by systemd
 pub fn exists(unit: &str) -> std::io::Result<bool> {
-    let unit_list = list_units(None, None, Some(unit))?;
+    let unit_list = list_unit_files(None, None, Some(unit))?;
     Ok(!unit_list.is_empty())
 }
 
-/// Returns a `Vector` of `UnitList` structs extracted from systemctl listing.
-///  + type filter: optional `--type` filter
-///  + state filter: optional `--state` filter
-///  + glob filter: optional unit name filter
 pub fn list_units_full(
     type_filter: Option<&str>,
     state_filter: Option<&str>,
     glob: Option<&str>,
 ) -> std::io::Result<Vec<UnitList>> {
-    let mut args = vec!["list-unit-files"];
+    let mut args = vec!["list-units"];
     if let Some(filter) = type_filter {
         args.push("--type");
         args.push(filter)
@@ -201,6 +197,45 @@ pub fn list_units_full(
     }
     let mut result: Vec<UnitList> = Vec::new();
     let content = systemctl_capture(args)?;
+    let lines: Vec<&str> = content.lines().collect();
+
+    for l in &lines[1..lines.len() - 6] {
+        let _ = l.replace(|c: char| !c.is_ascii(), "").trim();
+        let parsed: Vec<&str> = l.split_ascii_whitespace().collect();
+        result.push(UnitList {
+            unit_file: parsed[0].to_string(),
+            loaded: LoadedState::from_str(parsed[1]).unwrap_or(LoadedState::Unknown),
+            active: ActiveState::from_str(parsed[2]).unwrap_or(ActiveState::Unknown),
+            sub: parsed[3].to_string(),
+            desc: parsed[4..].join(" "),
+        })
+    }
+    Ok(result)
+}
+
+/// Returns a `Vector` of `UnitFileList` structs extracted from systemctl listing.
+///  + type filter: optional `--type` filter
+///  + state filter: optional `--state` filter
+///  + glob filter: optional unit name filter
+pub fn list_unit_files_full(
+    type_filter: Option<&str>,
+    state_filter: Option<&str>,
+    glob: Option<&str>,
+) -> std::io::Result<Vec<UnitFileList>> {
+    let mut args = vec!["list-unit-files"];
+    if let Some(filter) = type_filter {
+        args.push("--type");
+        args.push(filter)
+    }
+    if let Some(filter) = state_filter {
+        args.push("--state");
+        args.push(filter)
+    }
+    if let Some(glob) = glob {
+        args.push(glob)
+    }
+    let mut result: Vec<UnitFileList> = Vec::new();
+    let content = systemctl_capture(args)?;
     let lines = content
         .lines()
         .filter(|line| line.contains('.') && !line.ends_with('.'));
@@ -213,7 +248,7 @@ pub fn list_units_full(
             "disabled" => Some(false),
             _ => None,
         };
-        result.push(UnitList {
+        result.push(UnitFileList {
             unit_file: parsed[0].to_string(),
             state: parsed[1].to_string(),
             vendor_preset,
@@ -226,7 +261,7 @@ pub fn list_units_full(
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 /// Implementation of list generated with
 /// `systemctl list-unit-files`
-pub struct UnitList {
+pub struct UnitFileList {
     /// Unit name: `name.type`
     pub unit_file: String,
     /// Unit state
@@ -235,27 +270,37 @@ pub struct UnitList {
     pub vendor_preset: Option<bool>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct UnitList {
+    pub unit_file: String,
+    pub loaded: LoadedState,
+    pub active: ActiveState,
+    pub sub: String,
+    pub desc: String,
+}
+
 /// Returns a `Vector` of unit names extracted from systemctl listing.
 ///  + type filter: optional `--type` filter
 ///  + state filter: optional `--state` filter
 ///  + glob filter: optional unit name filter
-pub fn list_units(
+pub fn list_unit_files(
     type_filter: Option<&str>,
     state_filter: Option<&str>,
     glob: Option<&str>,
 ) -> std::io::Result<Vec<String>> {
-    let list = list_units_full(type_filter, state_filter, glob);
+    let list = list_unit_files_full(type_filter, state_filter, glob);
     Ok(list?.iter().map(|n| n.unit_file.clone()).collect())
 }
 
 /// Returns list of services that are currently declared as disabled
 pub fn list_disabled_services() -> std::io::Result<Vec<String>> {
-    list_units(Some("service"), Some("disabled"), None)
+    list_unit_files(Some("service"), Some("disabled"), None)
 }
 
 /// Returns list of services that are currently declared as enabled
 pub fn list_enabled_services() -> std::io::Result<Vec<String>> {
-    list_units(Some("service"), Some("enabled"), None)
+    list_unit_files(Some("service"), Some("enabled"), None)
 }
 
 /// `AutoStartStatus` describes the Unit current state
@@ -307,12 +352,15 @@ pub enum Type {
 /// `LoadedState` describes a Unit's current loaded state
 #[derive(Copy, Clone, PartialEq, Eq, EnumString, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(not(feature = "serde"), derive(strum_macros::Display))]
 pub enum LoadedState {
-    #[strum(serialize = "masked")]
+    #[strum(serialize = "masked", to_string = "Masked")]
     #[default]
     Masked,
-    #[strum(serialize = "loaded")]
+    #[strum(serialize = "loaded", to_string = "Loaded")]
     Loaded,
+    #[strum(serialize = "", to_string = "Unknown")]
+    Unknown,
 }
 
 /// `ActiveState` describes a Unit's current active state
@@ -331,6 +379,10 @@ pub enum ActiveState {
     Deactivating,
     #[strum(serialize = "failed", to_string = "Failed")]
     Failed,
+    #[strum(serialize = "reloading", to_string = "Reloading")]
+    Reloading,
+    #[strum(serialize = "", to_string = "Unknown")]
+    Unknown,
 }
 
 /*
@@ -775,7 +827,7 @@ mod test {
 
     #[test]
     fn test_service_unit_construction() {
-        let units = list_units(None, None, None).unwrap(); // all units
+        let units = list_unit_files(None, None, None).unwrap(); // all units
         for unit in units {
             let unit = unit.as_str();
             if unit.contains('@') {
@@ -802,14 +854,22 @@ mod test {
     }
 
     #[test]
-    fn test_list_units_full() {
-        let units = list_units_full(None, None, None).unwrap(); // all units
+    fn test_list_unit_files_full() {
+        let units = list_unit_files_full(None, None, None).unwrap(); // all units
         for unit in units {
             println!("####################################");
             println!("Unit: {}", unit.unit_file);
             println!("State: {}", unit.state);
             println!("Vendor Preset: {:?}", unit.vendor_preset);
             println!("####################################");
+        }
+    }
+
+    #[test]
+    fn test_list_units_full() {
+        let units = list_units_full(None, None, None).unwrap();
+        for unit in units {
+            println!("{:#?}", unit);
         }
     }
 
@@ -841,7 +901,7 @@ mod test {
     #[cfg(feature = "serde")]
     #[test]
     fn test_serde_for_unit_list() {
-        let u = UnitList::default();
+        let u = UnitFileList::default();
         // serde
         let json_u = serde_json::to_string(&u).unwrap();
         let reverse = serde_json::from_str(&json_u).unwrap();

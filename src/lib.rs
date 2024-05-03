@@ -211,6 +211,9 @@ pub fn list_units_full_from_raw(raw: String) -> std::io::Result<Vec<UnitList>> {
     let mut result: Vec<UnitList> = Vec::new();
 
     for l in &lines[1..lines.len() - 6] {
+        if l.trim().is_empty() || l.contains('=') {
+            continue;
+        }
         let _ = l.replace(|c: char| !c.is_ascii(), "").trim();
         let parsed: Vec<&str> = l.split_ascii_whitespace().collect();
         result.push(UnitList {
